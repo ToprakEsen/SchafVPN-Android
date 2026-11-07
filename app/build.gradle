@@ -1,0 +1,55 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'io.github.toprakesen.schafvpn'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'io.github.toprakesen.schafvpn'
+        minSdk 26
+        targetSdk 36
+        versionCode 1
+        versionName '1.0.0'
+        // Telefonların neredeyse tamamı; x86 (emülatör) APK'yı büyütmesin
+        ndk { abiFilters 'arm64-v8a', 'armeabi-v7a' }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            // Kişisel kullanım: makinenin debug anahtarıyla imzalanır, doğrudan kurulabilir
+            signingConfig signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    // .so dosyaları sıkıştırılsın: APK ~100 MB yerine ~35 MB
+    packaging {
+        jniLibs { useLegacyPackaging true }
+    }
+
+    // libv2ray.aar içindeki geoip/geosite (26 MB) kullanılmıyor
+    androidResources {
+        ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~:!geoip.dat:!geosite.dat:!geoip-only-cn-private.dat'
+    }
+}
+
+dependencies {
+    implementation files('libs/libv2ray.aar')
+}
+
+tasks.register('checkEmbeddedFiles') {
+    doLast {
+        if (!file('src/main/assets/profile.txt').exists())
+            throw new GradleException('app/src/main/assets/profile.txt yok. kur.bat ile VLESS linkini gir.')
+        if (!file('libs/libv2ray.aar').exists())
+            throw new GradleException('app/libs/libv2ray.aar yok. scripts\\get-libv2ray.ps1 calistir.')
+    }
+}
+preBuild.dependsOn checkEmbeddedFiles

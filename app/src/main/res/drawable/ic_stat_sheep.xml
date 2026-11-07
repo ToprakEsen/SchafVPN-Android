@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Bildirim / tek renk simge: yün perçemi + kulaklar + yüz; gözler boşluk olarak oyulur -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="64"
+    android:viewportHeight="64">
+    <!-- perçem -->
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M18,24a7.5,7.5 0,1 0,15 0a7.5,7.5 0,1 0,-15 0Z
+            M24.5,19a7.5,7.5 0,1 0,15 0a7.5,7.5 0,1 0,-15 0Z
+            M31,24a7.5,7.5 0,1 0,15 0a7.5,7.5 0,1 0,-15 0Z" />
+    <!-- kulaklar -->
+    <group android:pivotX="14" android:pivotY="35" android:rotation="-24">
+        <path android:fillColor="#FFFFFFFF"
+            android:pathData="M6,35a8,4 0,1 0,16 0a8,4 0,1 0,-16 0Z" />
+    </group>
+    <group android:pivotX="50" android:pivotY="35" android:rotation="24">
+        <path android:fillColor="#FFFFFFFF"
+            android:pathData="M42,35a8,4 0,1 0,16 0a8,4 0,1 0,-16 0Z" />
+    </group>
+    <!-- yüz, gözler oyuk -->
+    <path android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M32,25c7.4,0 11.8,5.9 11.8,14.2C43.8,48.6 38.8,56 32,56S20.2,48.6 20.2,39.2C20.2,30.9 24.6,25 32,25Z
+            M24.9,38.5a3,3 0,1 0,6 0a3,3 0,1 0,-6 0Z
+            M33.1,38.5a3,3 0,1 0,6 0a3,3 0,1 0,-6 0Z" />
+</vector>

@@ -1,0 +1,20 @@
+# Kisisel VLESS profili: ASLA paylasma
+app/src/main/assets/profile.txt
+
+# Derleme ciktilari (APK icinde profil gomulu olur)
+dist/
+build/
+app/build/
+.gradle/
+local.properties
+
+# Xray kutuphanesi: scripts\get-libv2ray.ps1 indirir ve SHA256 dogrular
+app/libs/
+
+# Otomatik indirilen JDK / Android SDK
+.tools/
+
+# IDE
+.idea/
+*.iml
+.vscode/
