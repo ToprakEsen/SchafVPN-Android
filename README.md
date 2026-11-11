@@ -2,6 +2,9 @@
 
 [SchafVPN](https://github.com/ToprakEsen/SchafVPN)'in Android sürümü: kendi VLESS profilinle çalışan, kendini güncelleyen tek dokunuşlu VPN.
 
+> 💻 **Windows sürümü:** [SchafVPN](https://github.com/ToprakEsen/SchafVPN)
+> ([exe indir](https://github.com/ToprakEsen/SchafVPN/releases/latest))
+
 - Aynı arayüz (WebView), aynı Xray sürümü (v26.10.31), ML-KEM ve Reality desteği.
 - Android'in `VpnService` TUN arayüzü doğrudan Xray'in yerleşik TUN girişine verilir; ek tun2socks katmanı yok.
 - Tüm trafik tünelden geçer (IPv4 + IPv6), yerel ağ doğrudan gider. DNS: 1.1.1.1 (tünel üzerinden).
