@@ -44,12 +44,34 @@ public final class Updater {
         catch (PackageManager.NameNotFoundException e) { return "0.0.0"; }
     }
 
-    /** Daha yeni bir sürüm varsa bilgisini, yoksa null döner. */
+    /**
+     * Daha yeni bir sürüm varsa bilgisini, yoksa null döner; denetlenemezse hata fırlatır.
+     * Önce GitHub API (SHA256 özeti verir); API saatlik IP sınırına takılırsa (mobil
+     * operatörlerde IP'ler paylaşıldığı için sık olur) sınırsız releases/latest yönlendirmesine düşer.
+     */
     public static Info check(Context c) throws Exception {
+        Exception apiError;
+        try {
+            Info viaApi = checkApi(c);
+            if (viaApi != NO_RELEASE_YET) return viaApi;
+            return null;
+        } catch (Exception e) { apiError = e; }
+        try { return checkRedirect(c); }
+        catch (Exception e) {
+            throw new Exception("GitHub'a ulaşılamadı (" + apiError.getMessage() + "; " + e.getMessage() + ")");
+        }
+    }
+
+    /** "Henüz hiç sürüm yok" işareti (API 404). */
+    private static final Info NO_RELEASE_YET = new Info("", "", "", 0);
+
+    private static Info checkApi(Context c) throws Exception {
         HttpURLConnection h = open("https://api.github.com/repos/" + REPO + "/releases/latest", c);
         h.setRequestProperty("Accept", "application/vnd.github+json");
         try {
-            if (h.getResponseCode() != 200) return null; // henüz sürüm yok (404) veya limit
+            int code = h.getResponseCode();
+            if (code == 404) return NO_RELEASE_YET;
+            if (code != 200) throw new Exception("API HTTP " + code);
             JSONObject root = new JSONObject(readAll(h.getInputStream()));
             String tag = root.optString("tag_name").replaceFirst("^[vV]", "");
             if (compare(tag, current(c)) <= 0) return null;
@@ -77,6 +99,33 @@ public final class Updater {
             if (sha == null || sha.length() != 64) return null; // doğrulanamayan güncelleme kurulmaz
             return new Info(tag, url, sha.toLowerCase(Locale.ROOT), size);
         } finally { h.disconnect(); }
+    }
+
+    /** API'siz yol: github.com/.../releases/latest → .../releases/tag/vX.Y.Z yönlendirmesi. */
+    private static Info checkRedirect(Context c) throws Exception {
+        HttpURLConnection h = open("https://github.com/" + REPO + "/releases/latest", c);
+        h.setInstanceFollowRedirects(false);
+        String location;
+        try {
+            int code = h.getResponseCode();
+            location = h.getHeaderField("Location");
+            if (code / 100 != 3 || location == null) throw new Exception("releases/latest HTTP " + code);
+        } finally { h.disconnect(); }
+        int i = location.lastIndexOf("/tag/");
+        if (i < 0) return null; // hiç sürüm yok: /releases sayfasına yönlenir
+        String rawTag = location.substring(i + 5);
+        String tag = rawTag.replaceFirst("^[vV]", "");
+        if (compare(tag, current(c)) <= 0) return null;
+
+        String base = "https://github.com/" + REPO + "/releases/download/" + rawTag + "/" + ASSET;
+        HttpURLConnection s = open(base + ".sha256", c);
+        String sha;
+        try {
+            if (s.getResponseCode() != 200) throw new Exception(".sha256 HTTP " + s.getResponseCode());
+            sha = readAll(s.getInputStream()).trim().split("\\s+")[0];
+        } finally { s.disconnect(); }
+        if (sha.length() != 64) throw new Exception("SHA256 dosyası geçersiz.");
+        return new Info(tag, base, sha.toLowerCase(Locale.ROOT), 0);
     }
 
     /** APK'yı indirir ve SHA256 doğrular; doğrulanmış dosyayı döner. */
