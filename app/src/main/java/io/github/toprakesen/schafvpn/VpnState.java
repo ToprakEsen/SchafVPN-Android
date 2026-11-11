@@ -12,6 +12,8 @@ public final class VpnState {
     public interface Listener { void onVpnStateChanged(); }
 
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
+    /** Hızlı Ayarlar kutucuğunu yenilemek için uygulama bağlamı (servis/ekran açılınca atanır). */
+    static volatile android.content.Context appContext;
     private static final CopyOnWriteArrayList<Listener> LISTENERS = new CopyOnWriteArrayList<>();
 
     private static volatile String state = IDLE;
@@ -53,7 +55,10 @@ public final class VpnState {
     public static void removeListener(Listener l) { LISTENERS.remove(l); }
 
     private static void notifyListeners() {
-        MAIN.post(() -> { for (Listener l : LISTENERS) l.onVpnStateChanged(); });
+        MAIN.post(() -> {
+            for (Listener l : LISTENERS) l.onVpnStateChanged();
+            if (appContext != null) SchafTileService.refresh(appContext);
+        });
     }
 
     private VpnState() {}

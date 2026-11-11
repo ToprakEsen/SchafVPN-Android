@@ -46,6 +46,12 @@ public final class SchafVpnService extends VpnService {
     }
 
     @Override
+    public void onCreate() {
+        super.onCreate();
+        VpnState.appContext = getApplicationContext();
+    }
+
+    @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         String action = intent != null ? intent.getAction() : null;
         if (ACTION_STOP.equals(action)) {

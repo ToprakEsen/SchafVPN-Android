@@ -48,6 +48,8 @@ public final class MainActivity extends Activity implements VpnState.Listener {
     /** Arayüzde sunucu adı yerine gösterilen sabit isim. */
     private static final String SERVER_LABEL = "KoyunVPN";
     private static final long UPDATE_INTERVAL_MS = 6L * 60 * 60 * 1000;
+    /** Hızlı Ayarlar kutucuğu izin/profil gerektirdiğinde uygulamayı bu eylemle açar. */
+    static final String ACTION_CONNECT = "io.github.toprakesen.schafvpn.CONNECT";
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService io = Executors.newSingleThreadExecutor();
@@ -93,6 +95,7 @@ public final class MainActivity extends Activity implements VpnState.Listener {
         super.onCreate(savedInstanceState);
         getWindow().setStatusBarColor(Color.TRANSPARENT);
         getWindow().setNavigationBarColor(Color.TRANSPARENT);
+        VpnState.appContext = getApplicationContext();
         settings = new AppSettings(this);
         loadProfile();
 
@@ -130,6 +133,21 @@ public final class MainActivity extends Activity implements VpnState.Listener {
         web.loadUrl("file:///android_asset/index.html");
 
         VpnState.addListener(this);
+        handleIntent(getIntent());
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleIntent(intent);
+    }
+
+    /** Kutucuktan gelindiyse bağlan (izin ekranı gerekiyorsa burada açılır). */
+    private void handleIntent(Intent intent) {
+        if (intent == null || !ACTION_CONNECT.equals(intent.getAction())) return;
+        intent.setAction(null); // ekran döndürülünce tekrar tetiklenmesin
+        main.post(() -> { if (VpnState.IDLE.equals(VpnState.state())) toggle(); });
     }
 
     private void loadProfile() {
@@ -202,6 +220,7 @@ public final class MainActivity extends Activity implements VpnState.Listener {
                 break;
             case "checkUpdate": checkForUpdate(true); break;
             case "applyUpdate": applyUpdate(); break;
+            case "addTile": addTile(); break;
             case "openVpnSettings":
                 try { startActivity(new Intent(Settings.ACTION_VPN_SETTINGS)); }
                 catch (Exception e) { notice("VPN ayarları açılamadı."); }
@@ -276,6 +295,26 @@ public final class MainActivity extends Activity implements VpnState.Listener {
             refreshIp(800);
         }
         pushUpdate();
+    }
+
+    /** Hızlı Ayarlar kutucuğunu panele ekle (Android 13+ sistem penceresiyle). */
+    private void addTile() {
+        if (Build.VERSION.SDK_INT >= 33) {
+            android.app.StatusBarManager sbm = getSystemService(android.app.StatusBarManager.class);
+            sbm.requestAddTileService(
+                    new android.content.ComponentName(this, SchafTileService.class),
+                    "SchafVPN",
+                    android.graphics.drawable.Icon.createWithResource(this, R.drawable.ic_stat_sheep),
+                    getMainExecutor(),
+                    result -> {
+                        if (result == android.app.StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ADDED)
+                            notice("Kutucuk eklendi. Bildirim panelini aşağı kaydırınca göreceksin.");
+                        else if (result == android.app.StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ALREADY_ADDED)
+                            notice("Kutucuk zaten panelde.");
+                    });
+        } else {
+            notice("Paneli iki kez aşağı kaydır → kalem simgesi → SchafVPN'i sürükle.");
+        }
     }
 
     // ---------------------------------------------------------------- bağlantı
