@@ -46,19 +46,19 @@ public final class Updater {
 
     /**
      * Daha yeni bir sürüm varsa bilgisini, yoksa null döner; denetlenemezse hata fırlatır.
-     * Önce GitHub API (SHA256 özeti verir); API saatlik IP sınırına takılırsa (mobil
-     * operatörlerde IP'ler paylaşıldığı için sık olur) sınırsız releases/latest yönlendirmesine düşer.
+     * Önce github.com/.../releases/latest yönlendirmesi + .sha256 dosyası: GitHub API'nin
+     * saatlik IP sınırına (mobil operatörlerde IP'ler paylaşıldığı için çabuk dolar) tabi değil.
+     * Yalnızca o başarısız olursa API denenir.
      */
     public static Info check(Context c) throws Exception {
-        Exception apiError;
+        Exception redirectError;
+        try { return checkRedirect(c); }
+        catch (Exception e) { redirectError = e; }
         try {
             Info viaApi = checkApi(c);
-            if (viaApi != NO_RELEASE_YET) return viaApi;
-            return null;
-        } catch (Exception e) { apiError = e; }
-        try { return checkRedirect(c); }
-        catch (Exception e) {
-            throw new Exception("GitHub'a ulaşılamadı (" + apiError.getMessage() + "; " + e.getMessage() + ")");
+            return viaApi == NO_RELEASE_YET ? null : viaApi;
+        } catch (Exception e) {
+            throw new Exception("GitHub'a ulaşılamadı (" + redirectError.getMessage() + "; " + e.getMessage() + ")");
         }
     }
 
