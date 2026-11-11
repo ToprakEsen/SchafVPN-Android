@@ -77,12 +77,12 @@ Write-Host "Android SDK: $sdk"
 # ---------------------------------------------------------------- Xray kutuphanesi + profil
 if (-not (Test-Path "app\libs\libv2ray.aar")) { & "$PSScriptRoot\scripts\get-libv2ray.ps1" }
 if (-not (Test-Path "app\src\main\assets\profile.txt")) {
-    throw "Profil yok. kur.bat ile VLESS linkini gir (veya app\src\main\assets\profile.txt olustur)."
+    Write-Host "Not: profil gomulmuyor; uygulama ilk acilista VLESS linkini soracak."
 }
 
 # ---------------------------------------------------------------- derleme
 [Environment]::CurrentDirectory = $PSScriptRoot
-& "$PSScriptRoot\gradlew.bat" -p "$PSScriptRoot" assembleRelease --console=plain
+& "$PSScriptRoot\gradlew.bat" -p "$PSScriptRoot" assembleRelease --console=plain --no-daemon
 if ($LASTEXITCODE -ne 0) { throw "Derleme basarisiz." }
 
 New-Item -ItemType Directory -Force dist | Out-Null

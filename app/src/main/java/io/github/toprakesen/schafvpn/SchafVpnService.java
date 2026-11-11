@@ -12,10 +12,7 @@ import android.os.Build;
 import android.os.ParcelFileDescriptor;
 import android.util.Log;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
 import java.net.ServerSocket;
-import java.nio.charset.StandardCharsets;
 
 import libv2ray.CoreCallbackHandler;
 import libv2ray.CoreController;
@@ -66,7 +63,9 @@ public final class SchafVpnService extends VpnService {
             userStopping = false;
             VpnState.setConnecting();
             try {
-                VlessProfile profile = VlessProfile.parse(readProfile());
+                String link = ProfileStore.load(this);
+                if (link == null) throw new IllegalStateException("Profil eklenmemiş. Uygulamayı açıp VLESS linkini gir.");
+                VlessProfile profile = VlessProfile.parse(link);
                 int socksPort = freePort();
                 String config = profile.buildXrayConfig(socksPort);
 
@@ -172,18 +171,6 @@ public final class SchafVpnService extends VpnService {
     }
 
     // ---------------------------------------------------------------- yardımcılar
-
-    private String readProfile() throws Exception {
-        try (BufferedReader r = new BufferedReader(new InputStreamReader(
-                getAssets().open("profile.txt"), StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = r.readLine()) != null) {
-                line = line.trim();
-                if (line.toLowerCase().startsWith("vless://")) return line;
-            }
-        }
-        throw new IllegalStateException("Gömülü profilde vless:// linki yok.");
-    }
 
     private static int freePort() throws Exception {
         try (ServerSocket s = new ServerSocket(0)) { return s.getLocalPort(); }

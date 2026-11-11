@@ -1,31 +1,45 @@
 # SchafVPN Android
 
-[SchafVPN](https://github.com/ToprakEsen/SchafVPN)'in Android sürümü: tek dokunuşlu, kendi VLESS profilini içine gömen VPN.
+[SchafVPN](https://github.com/ToprakEsen/SchafVPN)'in Android sürümü: kendi VLESS profilinle çalışan, kendini güncelleyen tek dokunuşlu VPN.
 
 - Aynı arayüz (WebView), aynı Xray sürümü (v26.10.31), ML-KEM ve Reality desteği.
 - Android'in `VpnService` TUN arayüzü doğrudan Xray'in yerleşik TUN girişine verilir; ek tun2socks katmanı yok.
 - Tüm trafik tünelden geçer (IPv4 + IPv6), yerel ağ doğrudan gider. DNS: 1.1.1.1 (tünel üzerinden).
 - Android 8.0 (API 26) ve üstü, ARM 64/32 bit telefonlar.
 
-## Kendi APK'nı oluştur (Windows)
+## Kurulum
 
-1. Bu klasörü indir.
-2. **`kur.bat`** dosyasına çift tıkla.
-3. `vless://...` linkini yapıştır ve Enter'a bas.
-4. JDK ve Android SDK yoksa otomatik indirilir (yönetici izni gerekmez, `.tools\` klasörüne).
-5. Bitince `dist\SchafVPN.apk` oluşur. Telefona at, kur ("Bilinmeyen kaynaklar" iznini ver).
+1. [**Releases**](https://github.com/ToprakEsen/SchafVPN-Android/releases/latest) sayfasından `SchafVPN.apk` dosyasını telefona indir ve kur
+   ("Bilinmeyen kaynaklardan yükleme" iznini ver).
+2. İlk açılışta v2rayN / v2rayNG'den kopyaladığın `vless://...` linkini yapıştırıp **Kaydet**'e dokun.
+3. Güç düğmesine dokun; Android "VPN bağlantısı isteği" sorar, **Tamam** de.
 
-İlk açılışta Android "VPN bağlantısı isteği" sorar; **Tamam** de. Bağlıyken bildirimde süre ve
-"Bağlantıyı kes" düğmesi görünür.
+- Link yalnızca telefonda, Android Keystore anahtarıyla şifrelenerek saklanır. APK'da profil yoktur.
+- **Ayarlar** (sağ üstteki dişli): açılışta otomatik bağlan, Android'in "Her zaman açık VPN" ayarı,
+  profil değiştirme, otomatik güncelleme.
+- Yeni sürüm yayınlandığında uygulama arka planda indirir ve **Güncelle** düğmesi gösterir;
+  Android kurulum için bir kez onay ister.
 
-> Oluşan APK **senin VLESS linkini içerir**, başkasıyla paylaşma.
-
-## Elle derleme
+## Yeni sürüm yayınlama (geliştirici)
 
 ```powershell
-# app\src\main\assets\profile.txt içine vless:// linkini koy
-.\build.ps1        # -> dist\SchafVPN.apk
+.\release.ps1 -Version 1.2.0 -Notes "Neler değişti"
 ```
+
+Script profilsiz APK derler, içinde kişisel profil olmadığını ve kalıcı anahtarla imzalandığını
+doğrular, sürüm numarasını commit'ler ve GitHub Release oluşturur.
+
+> **İmza anahtarı:** Güncellemeler yalnızca aynı anahtarla imzalı APK'lar arasında kurulabilir.
+> Anahtar depo dışında, `%USERPROFILE%\.schafvpn\` klasöründedir (`android-release.jks` +
+> `keystore.properties`). **Bu klasörü yedekle**; kaybolursa kullanıcılar bir sonraki sürümü
+> ancak uygulamayı kaldırıp yeniden kurarak alabilir.
+
+## Kendin derle (isteğe bağlı)
+
+1. **`kur.bat`** dosyasına çift tıkla, linkini yapıştır. JDK ve Android SDK yoksa otomatik indirilir.
+2. `dist\SchafVPN.apk` oluşur. Bu APK linkini içerir (ilk açılışta şifreli depoya taşınır); paylaşma.
+
+Arayüz Windows sürümünden üretilir: `.\scripts\sync-ui.ps1` (ortak `ui/index.html` → Android kopyası).
 
 ## Yapı
 

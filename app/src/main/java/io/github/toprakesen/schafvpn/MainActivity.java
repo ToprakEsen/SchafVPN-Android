@@ -3,17 +3,21 @@ package io.github.toprakesen.schafvpn;
 import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Insets;
 import android.net.TrafficStats;
+import android.net.Uri;
 import android.net.VpnService;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Process;
+import android.provider.Settings;
 import android.view.View;
 import android.view.WindowInsets;
 import android.webkit.JavascriptInterface;
@@ -26,6 +30,7 @@ import android.widget.FrameLayout;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
+import java.io.File;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
@@ -36,23 +41,28 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/** Windows sürümündeki arayüzün aynısını (ui/index.html) WebView içinde gösterir. */
+/** Windows sürümündeki arayüzün aynısını (assets/index.html) WebView içinde gösterir. */
 public final class MainActivity extends Activity implements VpnState.Listener {
     private static final int BG = 0xFF090B10;
     private static final int REQ_VPN = 1, REQ_NOTIFY = 2;
     /** Arayüzde sunucu adı yerine gösterilen sabit isim. */
     private static final String SERVER_LABEL = "KoyunVPN";
+    private static final long UPDATE_INTERVAL_MS = 6L * 60 * 60 * 1000;
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService io = Executors.newSingleThreadExecutor();
+    private final ExecutorService upd = Executors.newSingleThreadExecutor();
     private final AtomicInteger ipGen = new AtomicInteger();
 
     private WebView web;
-    private boolean pageReady;
+    private AppSettings settings;
+    private boolean pageReady, autoConnectDone, updateBusy;
     private String lastState = "";
-    private String profileName = "", profileDetail = "VLESS";
+    private VlessProfile profile;
     private String profileError;
     private long lastRx = -1, lastTx = -1;
+    private Updater.Info update;
+    private File updateFile;
 
     private final Runnable trafficTick = new Runnable() {
         @Override public void run() {
@@ -70,20 +80,21 @@ public final class MainActivity extends Activity implements VpnState.Listener {
         }
     };
 
+    private final Runnable periodicUpdate = new Runnable() {
+        @Override public void run() {
+            if (settings.autoUpdate()) checkForUpdate(false);
+            main.postDelayed(this, UPDATE_INTERVAL_MS);
+        }
+    };
+
     @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface"})
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getWindow().setStatusBarColor(Color.TRANSPARENT);
         getWindow().setNavigationBarColor(Color.TRANSPARENT);
-
-        try {
-            VlessProfile p = VlessProfile.parse(readProfile());
-            profileName = SERVER_LABEL;
-            profileDetail = p.detail();
-        } catch (Exception e) {
-            profileError = e.getMessage();
-        }
+        settings = new AppSettings(this);
+        loadProfile();
 
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(BG);
@@ -94,11 +105,11 @@ public final class MainActivity extends Activity implements VpnState.Listener {
         root.addView(web, new FrameLayout.LayoutParams(-1, -1));
         setContentView(root);
 
-        // Kenardan kenara çizim: durum ve gezinme çubuğu kadar iç boşluk
+        // Kenardan kenara çizim: durum ve gezinme çubuğu (ve klavye) kadar iç boşluk
         root.setOnApplyWindowInsetsListener((v, insets) -> {
             int top, bottom;
             if (Build.VERSION.SDK_INT >= 30) {
-                Insets i = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+                Insets i = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout() | WindowInsets.Type.ime());
                 top = i.top; bottom = i.bottom;
             } else {
                 top = insets.getSystemWindowInsetTop(); bottom = insets.getSystemWindowInsetBottom();
@@ -121,6 +132,15 @@ public final class MainActivity extends Activity implements VpnState.Listener {
         VpnState.addListener(this);
     }
 
+    private void loadProfile() {
+        profile = null;
+        profileError = null;
+        String link = ProfileStore.load(this);
+        if (link == null) return; // profil yok: arayüz kurulum ekranını açar
+        try { profile = VlessProfile.parse(link); }
+        catch (Exception e) { profileError = e.getMessage(); }
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
@@ -130,8 +150,9 @@ public final class MainActivity extends Activity implements VpnState.Listener {
     @Override
     protected void onDestroy() {
         VpnState.removeListener(this);
-        main.removeCallbacks(trafficTick);
+        main.removeCallbacksAndMessages(null);
         io.shutdownNow();
+        upd.shutdownNow();
         web.destroy();
         super.onDestroy();
     }
@@ -142,21 +163,48 @@ public final class MainActivity extends Activity implements VpnState.Listener {
         @JavascriptInterface
         public void post(String json) {
             main.post(() -> {
-                try { handle(new JSONObject(json).optString("cmd")); } catch (Exception ignored) { }
+                try { handle(new JSONObject(json)); } catch (Exception ignored) { }
             });
         }
     }
 
-    private void handle(String cmd) {
-        switch (cmd) {
+    private void handle(JSONObject m) throws Exception {
+        switch (m.optString("cmd")) {
             case "ready":
                 pageReady = true;
                 lastState = "";
                 onVpnStateChanged();
+                pushSettings();
+                send(new JSONObject().put("type", "version").put("version", Updater.current(this)));
+                pushUpdate();
                 refreshIp(0);
+                main.removeCallbacks(periodicUpdate);
+                main.postDelayed(periodicUpdate, 4000);
+                if (settings.autoConnect() && !autoConnectDone && profile != null && VpnState.IDLE.equals(VpnState.state())) {
+                    autoConnectDone = true;
+                    toggle();
+                }
                 break;
-            case "toggle":
-                toggle();
+            case "toggle": toggle(); break;
+            case "saveProfile": saveProfile(m.optString("link")); break;
+            case "paste": {
+                ClipboardManager cm = getSystemService(ClipboardManager.class);
+                ClipData clip = cm != null ? cm.getPrimaryClip() : null;
+                String text = clip != null && clip.getItemCount() > 0 && clip.getItemAt(0).getText() != null
+                        ? clip.getItemAt(0).getText().toString().trim() : "";
+                send(new JSONObject().put("type", "paste").put("text", text));
+                break;
+            }
+            case "setSetting":
+                settings.set(m.optString("key"), m.optBoolean("value"));
+                if ("autoUpdate".equals(m.optString("key")) && m.optBoolean("value")) checkForUpdate(false);
+                pushSettings();
+                break;
+            case "checkUpdate": checkForUpdate(true); break;
+            case "applyUpdate": applyUpdate(); break;
+            case "openVpnSettings":
+                try { startActivity(new Intent(Settings.ACTION_VPN_SETTINGS)); }
+                catch (Exception e) { notice("VPN ayarları açılamadı."); }
                 break;
         }
     }
@@ -167,18 +215,47 @@ public final class MainActivity extends Activity implements VpnState.Listener {
         main.post(() -> web.evaluateJavascript(js, null));
     }
 
+    private void notice(String text) {
+        try { send(new JSONObject().put("type", "notice").put("text", text)); } catch (Exception ignored) { }
+    }
+
     private void pushState(String errorTitle, String error) {
         try {
             JSONObject m = new JSONObject()
                     .put("type", "state")
                     .put("state", VpnState.state())
-                    .put("name", profileError != null ? "Profil okunamadı" : profileName)
-                    .put("detail", profileError != null ? profileError : profileDetail)
+                    .put("hasProfile", profile != null || profileError != null)
+                    .put("name", profileError != null ? "Profil okunamadı" : SERVER_LABEL)
+                    .put("detail", profileError != null ? profileError : profile != null ? profile.detail() : "VLESS")
                     .put("profileError", profileError != null)
                     .put("connectedAt", VpnState.connectedAt());
             if (error != null) m.put("error", error).put("errorTitle", errorTitle);
             send(m);
         } catch (Exception ignored) { }
+    }
+
+    private void pushSettings() {
+        try {
+            send(new JSONObject().put("type", "settings")
+                    .put("autoConnect", settings.autoConnect())
+                    .put("autoUpdate", settings.autoUpdate()));
+        } catch (Exception ignored) { }
+    }
+
+    private void saveProfile(String link) {
+        io.execute(() -> {
+            JSONObject r = new JSONObject();
+            try {
+                if (!VpnState.IDLE.equals(VpnState.state()))
+                    throw new IllegalStateException("Profili değiştirmek için önce bağlantıyı kes.");
+                VlessProfile p = ProfileStore.save(this, link);
+                main.post(() -> { profile = p; profileError = null; pushState(null, null); });
+                r.put("type", "profileResult").put("ok", true);
+            } catch (Exception e) {
+                try { r.put("type", "profileResult").put("ok", false).put("message", e.getMessage()); } catch (Exception ignored) { }
+            }
+            send(r);
+        });
     }
 
     @Override
@@ -198,14 +275,16 @@ public final class MainActivity extends Activity implements VpnState.Listener {
         } else if (VpnState.IDLE.equals(st)) {
             refreshIp(800);
         }
+        pushUpdate();
     }
 
     // ---------------------------------------------------------------- bağlantı
 
     private void toggle() {
         String st = VpnState.state();
-        if (VpnState.CONNECTING.equals(st) || profileError != null) return;
+        if (VpnState.CONNECTING.equals(st)) return;
         if (VpnState.CONNECTED.equals(st)) { SchafVpnService.stop(this); return; }
+        if (profile == null) { pushState(null, null); return; } // kurulum ekranı açılsın
 
         if (Build.VERSION.SDK_INT >= 33
                 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
@@ -237,6 +316,75 @@ public final class MainActivity extends Activity implements VpnState.Listener {
             lastState = "";
             pushState("VPN izni verilmedi", "Bağlanmak için VPN bağlantı isteğini onaylaman gerekiyor.");
         }
+    }
+
+    // ---------------------------------------------------------------- güncelleme
+
+    private void checkForUpdate(boolean manual) {
+        if (updateBusy) return;
+        updateBusy = true;
+        if (manual) sendUpdate("checking", null, 0);
+        upd.execute(() -> {
+            try {
+                Updater.Info info = Updater.check(this);
+                if (info == null) {
+                    if (manual) {
+                        JSONObject m = new JSONObject().put("type", "update").put("status", "none").put("version", Updater.current(this));
+                        send(m);
+                    }
+                    return;
+                }
+                if (updateFile != null && update != null && update.version.equals(info.version)) { pushUpdate(); return; }
+                update = info;
+                sendUpdate("downloading", info.version, 0);
+                File f = Updater.download(this, info, p -> sendUpdate("downloading", info.version, p));
+                updateFile = f;
+                pushUpdate();
+            } catch (Exception e) {
+                if (manual) {
+                    try { send(new JSONObject().put("type", "update").put("status", "error").put("message", e.getMessage())); }
+                    catch (Exception ignored) { }
+                }
+            } finally {
+                main.post(() -> updateBusy = false);
+            }
+        });
+    }
+
+    private void sendUpdate(String status, String version, double progress) {
+        try {
+            JSONObject m = new JSONObject().put("type", "update").put("status", status).put("progress", progress);
+            if (version != null) m.put("version", version);
+            send(m);
+        } catch (Exception ignored) { }
+    }
+
+    private void pushUpdate() {
+        if (update == null || updateFile == null) return;
+        try {
+            send(new JSONObject().put("type", "update").put("status", "ready").put("version", update.version)
+                    .put("connected", !VpnState.IDLE.equals(VpnState.state())));
+        } catch (Exception ignored) { }
+    }
+
+    private void applyUpdate() {
+        if (updateFile == null || !updateFile.exists()) return;
+        // Android: bilinmeyen kaynaklardan kurma izni (ilk seferde ayarlardan verilir)
+        if (!getPackageManager().canRequestPackageInstalls()) {
+            notice("Güncellemeyi kurmak için SchafVPN'e izin ver, sonra tekrar Güncelle'ye dokun.");
+            startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + getPackageName())));
+            pushUpdate();
+            return;
+        }
+        File f = updateFile;
+        upd.execute(() -> {
+            try { Updater.install(this, f); }
+            catch (Exception e) {
+                try { send(new JSONObject().put("type", "update").put("status", "error").put("message", e.getMessage())); }
+                catch (Exception ignored) { }
+                pushUpdate();
+            }
+        });
     }
 
     // ---------------------------------------------------------------- IP / konum
@@ -275,16 +423,5 @@ public final class MainActivity extends Activity implements VpnState.Listener {
                 }
             }
         });
-    }
-
-    private String readProfile() throws Exception {
-        try (BufferedReader r = new BufferedReader(new InputStreamReader(getAssets().open("profile.txt"), StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = r.readLine()) != null) {
-                line = line.trim();
-                if (line.toLowerCase().startsWith("vless://")) return line;
-            }
-        }
-        throw new IllegalStateException("Gömülü profilde vless:// linki yok.");
     }
 }

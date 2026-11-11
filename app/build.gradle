@@ -2,6 +2,19 @@ plugins {
     id 'com.android.application'
 }
 
+// Sürüm: gradle.properties'teki appVersion veya -PappVersion=1.2.0 (release.ps1)
+def appVersion = (project.findProperty('appVersion') ?: '1.0.0').toString()
+def (vMajor, vMinor, vPatch) = appVersion.tokenize('.').collect { it as int }
+
+// embedProfile=false (release.ps1): assets/profile.txt APK'ya HİÇ girmez
+def embedProfile = (project.findProperty('embedProfile') ?: 'true').toString() != 'false'
+
+// Kalıcı imza anahtarı (depo dışında): ~/.schafvpn/keystore.properties
+// Güncellemeler yalnızca aynı anahtarla imzalı APK'lar arasında kurulabilir.
+def ksPropsFile = new File(System.getProperty('user.home'), '.schafvpn/keystore.properties')
+def ksProps = new Properties()
+if (ksPropsFile.exists()) ksPropsFile.withInputStream { ksProps.load(it) }
+
 android {
     namespace 'io.github.toprakesen.schafvpn'
     compileSdk 36
@@ -10,17 +23,28 @@ android {
         applicationId 'io.github.toprakesen.schafvpn'
         minSdk 26
         targetSdk 36
-        versionCode 1
-        versionName '1.0.0'
+        versionCode vMajor * 10000 + vMinor * 100 + vPatch
+        versionName appVersion
         // Telefonların neredeyse tamamı; x86 (emülatör) APK'yı büyütmesin
         ndk { abiFilters 'arm64-v8a', 'armeabi-v7a' }
+    }
+
+    signingConfigs {
+        if (ksProps['storeFile']) {
+            release {
+                storeFile file(ksProps['storeFile'])
+                storePassword ksProps['storePassword']
+                keyAlias ksProps['keyAlias']
+                keyPassword ksProps['keyPassword']
+            }
+        }
     }
 
     buildTypes {
         release {
             minifyEnabled false
-            // Kişisel kullanım: makinenin debug anahtarıyla imzalanır, doğrudan kurulabilir
-            signingConfig signingConfigs.debug
+            // Kalıcı anahtar yoksa (başkasının bilgisayarı) makinenin debug anahtarı
+            signingConfig ksProps['storeFile'] ? signingConfigs.release : signingConfigs.debug
         }
     }
 
@@ -29,14 +53,15 @@ android {
         targetCompatibility JavaVersion.VERSION_17
     }
 
-    // .so dosyaları sıkıştırılsın: APK ~100 MB yerine ~35 MB
+    // .so dosyaları sıkıştırılsın: APK ~100 MB yerine ~23 MB
     packaging {
         jniLibs { useLegacyPackaging true }
     }
 
-    // libv2ray.aar içindeki geoip/geosite (26 MB) kullanılmıyor
+    // libv2ray.aar içindeki geoip/geosite (26 MB) kullanılmıyor; yayında profil de girmez
     androidResources {
-        ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~:!geoip.dat:!geosite.dat:!geoip-only-cn-private.dat'
+        ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~:!geoip.dat:!geosite.dat:!geoip-only-cn-private.dat' +
+                (embedProfile ? '' : ':!profile.txt')
     }
 }
 
@@ -46,8 +71,6 @@ dependencies {
 
 tasks.register('checkEmbeddedFiles') {
     doLast {
-        if (!file('src/main/assets/profile.txt').exists())
-            throw new GradleException('app/src/main/assets/profile.txt yok. kur.bat ile VLESS linkini gir.')
         if (!file('libs/libv2ray.aar').exists())
             throw new GradleException('app/libs/libv2ray.aar yok. scripts\\get-libv2ray.ps1 calistir.')
     }
