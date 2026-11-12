@@ -25,17 +25,24 @@ public final class VpnState {
     public static long connectedAt() { return connectedAt; }
     public static int socksPort() { return socksPort; }
 
-    static void setConnecting() { state = CONNECTING; notifyListeners(); }
+    /** Bağlanırken bulunulan adım ("Tünel kuruluyor" vb.); bağlanmıyorken null. */
+    private static volatile String stage;
+    public static String stage() { return stage; }
+    static void setStage(String s) { stage = s; notifyListeners(); }
+
+    static void setConnecting() { stage = null; state = CONNECTING; notifyListeners(); }
 
     static void setConnected(int port) {
         socksPort = port;
         connectedAt = System.currentTimeMillis();
+        stage = null;
         state = CONNECTED;
         notifyListeners();
     }
 
     static void setIdle(String errorTitle, String error) {
         state = IDLE;
+        stage = null;
         socksPort = 0;
         pendingErrorTitle = errorTitle;
         pendingError = error;

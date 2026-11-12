@@ -59,11 +59,41 @@ public final class SchafVpnService extends VpnService {
             return START_NOT_STICKY;
         }
         showNotification(false);
-        new Thread(this::startVpn, "vpn-start").start();
+        // Kullanıcı başlattıysa bağlantı doğrulanır. Sistem başlattıysa ("Her zaman açık VPN",
+        // telefon açılışı) ağ henüz hazır olmayabilir: doğrulama yapılmaz, VPN ayakta kalır.
+        boolean verify = ACTION_START.equals(action);
+        new Thread(() -> startVpn(verify), "vpn-start").start();
         return START_NOT_STICKY;
     }
 
-    private void startVpn() {
+    /**
+     * Xray'in yerel SOCKS girişi üzerinden küçük bir istek atar; herhangi bir HTTP yanıtı
+     * sunucunun trafik geçirdiğini gösterir. ~9 saniye içinde yanıt yoksa false.
+     */
+    private static boolean verifyTunnel(int socksPort) {
+        String[] urls = { "https://www.gstatic.com/generate_204", "https://cp.cloudflare.com/generate_204" };
+        java.net.Proxy proxy = new java.net.Proxy(java.net.Proxy.Type.SOCKS,
+                new java.net.InetSocketAddress("127.0.0.1", socksPort));
+        long deadline = System.currentTimeMillis() + 9000;
+        for (int i = 0; System.currentTimeMillis() < deadline; i++) {
+            java.net.HttpURLConnection c = null;
+            try {
+                c = (java.net.HttpURLConnection) new java.net.URL(urls[i % urls.length]).openConnection(proxy);
+                c.setConnectTimeout(4000);
+                c.setReadTimeout(4000);
+                c.setRequestProperty("Connection", "close");
+                c.getResponseCode();
+                return true;
+            } catch (Exception e) {
+                try { Thread.sleep(400); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); return false; }
+            } finally {
+                if (c != null) c.disconnect();
+            }
+        }
+        return false;
+    }
+
+    private void startVpn(boolean verify) {
         synchronized (lock) {
             if (core != null && core.getIsRunning()) return;
             userStopping = false;
@@ -75,6 +105,7 @@ public final class SchafVpnService extends VpnService {
                 int socksPort = freePort();
                 String config = profile.buildXrayConfig(socksPort);
 
+                VpnState.setStage("Tünel kuruluyor");
                 Builder b = new Builder()
                         .setSession("SchafVPN")
                         .setMtu(MTU)
@@ -91,9 +122,18 @@ public final class SchafVpnService extends VpnService {
                 tun = b.establish();
                 if (tun == null) throw new IllegalStateException("VPN izni verilmedi.");
 
+                VpnState.setStage("Xray başlatılıyor");
                 Libv2ray.initCoreEnv(getFilesDir().getAbsolutePath(), "");
                 core = Libv2ray.newCoreController(new Callback());
                 core.startLoop(config, tun.getFd());
+
+                if (verify) {
+                    // Tünel kalktı diye "bağlandı" deme: sunucunun gerçekten trafik geçirdiğini doğrula
+                    VpnState.setStage("Bağlantı doğrulanıyor");
+                    if (!verifyTunnel(socksPort))
+                        throw new IllegalStateException(
+                                "Sunucuya ulaşılamadı. Sunucu kapalı olabilir, link hatalı olabilir ya da ağın bu bağlantıyı engelliyor olabilir.");
+                }
 
                 VpnState.setConnected(socksPort);
                 showNotification(true);

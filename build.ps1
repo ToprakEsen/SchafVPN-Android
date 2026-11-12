@@ -1,5 +1,7 @@
 # SchafVPN Android APK'sini derler -> dist\SchafVPN.apk
 # JDK veya Android SDK yoksa yonetici izni gerektirmeden .tools\ klasorune indirir.
+# -Version X.Y.Z: test derlemesini etiketlemek icin (verilmezse gradle.properties'teki surum).
+param([string]$Version = "")
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -82,7 +84,9 @@ if (-not (Test-Path "app\src\main\assets\profile.txt")) {
 
 # ---------------------------------------------------------------- derleme
 [Environment]::CurrentDirectory = $PSScriptRoot
-& "$PSScriptRoot\gradlew.bat" -p "$PSScriptRoot" assembleRelease --console=plain --no-daemon
+$gradleArgs = @("-p", "$PSScriptRoot", "assembleRelease", "--console=plain", "--no-daemon")
+if ($Version) { $gradleArgs += "-PappVersion=$Version" }
+& "$PSScriptRoot\gradlew.bat" @gradleArgs
 if ($LASTEXITCODE -ne 0) { throw "Derleme basarisiz." }
 
 New-Item -ItemType Directory -Force dist | Out-Null

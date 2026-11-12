@@ -23,6 +23,8 @@ $shim = @'
       addEventListener: function (type, cb) { if (type === 'message') listeners.push(cb); }
     };
     window.__schafReceive = function (data) { listeners.forEach(function (cb) { cb({ data: data }); }); };
+    /* Tema sayfa cizilmeden atanir: acilista koyu/acik yanip sonme olmasin */
+    try { if (SchafAndroid.initialTheme() === 'light') document.documentElement.setAttribute('data-theme', 'light'); } catch (e) { }
   })();
 </script>
 '@

@@ -1,11 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- Açılış penceresi sistem temasını izler (values-night koyu değerleri verir);
+         asıl arayüz teması MainActivity.applyTheme ile ayarlanır. -->
     <style name="Theme.SchafVPN" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowBackground">@color/bg</item>
         <item name="android:colorBackground">@color/bg</item>
         <item name="android:colorAccent">#3DDC97</item>
-        <item name="android:windowLightStatusBar">false</item>
-        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:windowLightStatusBar">@bool/light_bars</item>
+        <item name="android:windowLightNavigationBar">@bool/light_bars</item>
     </style>
-    <color name="bg">#090B10</color>
+    <color name="bg">#F2F4F9</color>
+    <bool name="light_bars">true</bool>
 </resources>

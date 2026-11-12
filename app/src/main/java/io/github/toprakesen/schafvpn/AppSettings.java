@@ -12,6 +12,14 @@ public final class AppSettings {
     public boolean autoConnect() { return p.getBoolean("autoConnect", false); }
     public boolean autoUpdate() { return p.getBoolean("autoUpdate", true); }
 
+    /** "system" (cihaz ayarını izle), "dark" veya "light". */
+    public String theme() { return p.getString("theme", "system"); }
+
+    public void setTheme(String value) {
+        if ("system".equals(value) || "dark".equals(value) || "light".equals(value))
+            p.edit().putString("theme", value).apply();
+    }
+
     /** Bilinmeyen anahtar için false döner. */
     public boolean set(String key, boolean value) {
         switch (key) {

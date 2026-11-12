@@ -43,7 +43,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /** Windows sürümündeki arayüzün aynısını (assets/index.html) WebView içinde gösterir. */
 public final class MainActivity extends Activity implements VpnState.Listener {
-    private static final int BG = 0xFF090B10;
+    // assets/index.html içindeki --bg ile aynı renkler
+    private static final int BG_DARK = 0xFF090B10, BG_LIGHT = 0xFFF2F4F9;
     private static final int REQ_VPN = 1, REQ_NOTIFY = 2;
     /** Arayüzde sunucu adı yerine gösterilen sabit isim. */
     private static final String SERVER_LABEL = "KoyunVPN";
@@ -57,6 +58,9 @@ public final class MainActivity extends Activity implements VpnState.Listener {
     private final AtomicInteger ipGen = new AtomicInteger();
 
     private WebView web;
+    private FrameLayout root;
+    /** Şu an uygulanan tema ("dark" / "light"); köprüden sayfa yüklenirken de okunur. */
+    private volatile String themeNow = "dark";
     private AppSettings settings;
     private boolean pageReady, autoConnectDone, updateBusy;
     private String lastState = "";
@@ -99,14 +103,13 @@ public final class MainActivity extends Activity implements VpnState.Listener {
         settings = new AppSettings(this);
         loadProfile();
 
-        FrameLayout root = new FrameLayout(this);
-        root.setBackgroundColor(BG);
+        root = new FrameLayout(this);
         web = new WebView(this);
-        web.setBackgroundColor(BG);
         web.setOverScrollMode(View.OVER_SCROLL_NEVER);
         web.setVerticalScrollBarEnabled(false);
         root.addView(web, new FrameLayout.LayoutParams(-1, -1));
         setContentView(root);
+        applyTheme(false);
 
         // Kenardan kenara çizim: durum ve gezinme çubuğu (ve klavye) kadar iç boşluk
         root.setOnApplyWindowInsetsListener((v, insets) -> {
@@ -150,6 +153,50 @@ public final class MainActivity extends Activity implements VpnState.Listener {
         main.post(() -> { if (VpnState.IDLE.equals(VpnState.state())) toggle(); });
     }
 
+    // ---------------------------------------------------------------- tema
+
+    private boolean resolveLight() {
+        String pref = settings.theme();
+        if ("light".equals(pref)) return true;
+        if ("dark".equals(pref)) return false;
+        int night = getResources().getConfiguration().uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK;
+        return night != android.content.res.Configuration.UI_MODE_NIGHT_YES;
+    }
+
+    /** Arka planı ve sistem çubuklarının simge rengini temaya göre ayarlar. */
+    private void applyTheme(boolean notifyPage) {
+        boolean light = resolveLight();
+        themeNow = light ? "light" : "dark";
+        int bg = light ? BG_LIGHT : BG_DARK;
+        root.setBackgroundColor(bg);
+        web.setBackgroundColor(bg);
+        if (Build.VERSION.SDK_INT >= 30) {
+            android.view.WindowInsetsController c = getWindow().getInsetsController();
+            if (c != null) {
+                int mask = android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+                        | android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
+                c.setSystemBarsAppearance(light ? mask : 0, mask);
+            }
+        } else {
+            View decor = getWindow().getDecorView();
+            int mask = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+            int flags = decor.getSystemUiVisibility();
+            decor.setSystemUiVisibility(light ? flags | mask : flags & ~mask);
+        }
+        if (notifyPage) sendTheme();
+    }
+
+    private void sendTheme() {
+        try { send(new JSONObject().put("type", "theme").put("theme", themeNow)); } catch (Exception ignored) { }
+    }
+
+    /** Sistem koyu/açık moda geçtiğinde ("Sistem" seçiliyse) arayüz de değişsin. */
+    @Override
+    public void onConfigurationChanged(android.content.res.Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        if ("system".equals(settings.theme())) applyTheme(true);
+    }
+
     private void loadProfile() {
         profile = null;
         profileError = null;
@@ -184,6 +231,10 @@ public final class MainActivity extends Activity implements VpnState.Listener {
                 try { handle(new JSONObject(json)); } catch (Exception ignored) { }
             });
         }
+
+        /** Sayfa çizilmeden önce eşzamanlı okunur (açılışta tema yanıp sönmesin). */
+        @JavascriptInterface
+        public String initialTheme() { return themeNow; }
     }
 
     private void handle(JSONObject m) throws Exception {
@@ -191,6 +242,7 @@ public final class MainActivity extends Activity implements VpnState.Listener {
             case "ready":
                 pageReady = true;
                 lastState = "";
+                sendTheme();
                 onVpnStateChanged();
                 pushSettings();
                 send(new JSONObject().put("type", "version").put("version", Updater.current(this)));
@@ -216,6 +268,11 @@ public final class MainActivity extends Activity implements VpnState.Listener {
             case "setSetting":
                 settings.set(m.optString("key"), m.optBoolean("value"));
                 if ("autoUpdate".equals(m.optString("key")) && m.optBoolean("value")) checkForUpdate(false);
+                pushSettings();
+                break;
+            case "setTheme":
+                settings.setTheme(m.optString("value"));
+                applyTheme(true);
                 pushSettings();
                 break;
             case "checkUpdate": checkForUpdate(true); break;
@@ -257,7 +314,8 @@ public final class MainActivity extends Activity implements VpnState.Listener {
         try {
             send(new JSONObject().put("type", "settings")
                     .put("autoConnect", settings.autoConnect())
-                    .put("autoUpdate", settings.autoUpdate()));
+                    .put("autoUpdate", settings.autoUpdate())
+                    .put("theme", settings.theme()));
         } catch (Exception ignored) { }
     }
 
@@ -284,6 +342,11 @@ public final class MainActivity extends Activity implements VpnState.Listener {
         boolean changed = !st.equals(lastState);
         lastState = st;
         pushState(err != null ? err[0] : null, err != null ? err[1] : null);
+        // Bağlanırken servisin bulunduğu gerçek adım ("Tünel kuruluyor" vb.)
+        String stage = VpnState.stage();
+        if (VpnState.CONNECTING.equals(st) && stage != null) {
+            try { send(new JSONObject().put("type", "stage").put("text", stage)); } catch (Exception ignored) { }
+        }
         if (!changed) return;
 
         main.removeCallbacks(trafficTick);
